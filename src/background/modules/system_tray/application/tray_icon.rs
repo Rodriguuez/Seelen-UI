@@ -226,17 +226,16 @@ impl SystemTrayManager {
             return Err("Window handle is invalid".into());
         }
 
-        let is_mouse_click = matches!(
+let is_mouse_action = matches!(
             action,
             SystrayIconAction::LeftClick
                 | SystrayIconAction::RightClick
                 | SystrayIconAction::MiddleClick
+                | SystrayIconAction::HoverEnter
         );
 
-        // For mouse clicks, there is often a menu that appears after the
-        // click. Allow the notify icon to gain focus so that the menu can be
-        // dismissed after clicking outside.
-        if is_mouse_click {
+        // Разрешаем приложению выводить окно на передний план и при наведении, и при клике
+        if is_mouse_action {
             let mut proc_id = u32::default();
             unsafe { GetWindowThreadProcessId(HWND(window_handle as _), Some(&mut proc_id)) };
             let _ = unsafe { AllowSetForegroundWindow(proc_id) };
@@ -251,33 +250,12 @@ impl SystemTrayManager {
             SystrayIconAction::MiddleClick => {
                 vec![WM_MBUTTONDOWN, WM_MBUTTONUP]
             }
-            SystrayIconAction::HoverEnter => vec![WM_MOUSEHOVER],
+            // Отправляем WM_MOUSEMOVE, который ждут приложения Windows для показа окон
+            SystrayIconAction::HoverEnter => vec![WM_MOUSEMOVE, WM_MOUSEHOVER],
             SystrayIconAction::HoverLeave => vec![WM_MOUSELEAVE],
             SystrayIconAction::HoverMove => vec![WM_MOUSEMOVE],
         };
-
-        for wm_message in wm_messages {
-            Self::notify_icon(window_handle, callback, uid, icon.version, wm_message)?;
-        }
-
-        // Additional messages are sent for version 4 and above. Explorer sends
-        // these for version 3 as well though, so we do the same.
-        // Ref: https://learn.microsoft.com/en-us/windows/win32/api/shellapi/nf-shellapi-shell_notifyicona#remarks
-        if icon.version.is_some_and(|version| version >= 3) {
-            let v3_message = match action {
-                SystrayIconAction::HoverEnter => NIN_POPUPOPEN,
-                SystrayIconAction::HoverLeave => NIN_POPUPCLOSE,
-                SystrayIconAction::LeftClick => NIN_SELECT,
-                SystrayIconAction::RightClick => WM_CONTEXTMENU,
-                _ => return Ok(()),
-            };
-
-            Self::notify_icon(window_handle, callback, uid, icon.version, v3_message)?;
-        }
-
-        Ok(())
-    }
-
+        
     /// Sends a message to the systray icon window.
     fn notify_icon(
         window_handle: isize,
